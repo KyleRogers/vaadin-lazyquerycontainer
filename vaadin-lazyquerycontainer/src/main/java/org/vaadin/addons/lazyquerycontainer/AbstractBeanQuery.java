@@ -53,6 +53,11 @@ public abstract class AbstractBeanQuery<T> implements Query, Serializable {
     private boolean[] sortStates;
 
     /**
+     * Converter responsible for converting beans into {@link com.vaadin.data.Item}
+     */
+    private BeanToItemConverter<T> itemConverter = new BeanToNestedItemConverter<>();
+
+    /**
      * Default constructor for serialization.
      */
     public AbstractBeanQuery() {
@@ -151,7 +156,7 @@ public abstract class AbstractBeanQuery<T> implements Query, Serializable {
      * @return List of items.
      */
     public final List<Item> loadItems(final int startIndex, final int count) {
-        List<Item> items = new ArrayList<Item>();
+        List<Item> items = new ArrayList<>();
         for (T bean : loadBeans(startIndex, count)) {
             items.add(toItem(bean));
         }
@@ -213,30 +218,8 @@ public abstract class AbstractBeanQuery<T> implements Query, Serializable {
      * @param bean bean to be converted.
      * @return item converted from bean.
      */
-    @SuppressWarnings({"unchecked", "rawtypes" })
     private Item toItem(final T bean) {
-        NestingBeanItem<T> beanItem = new NestingBeanItem<T>(bean,
-                queryDefinition.getMaxNestedPropertyDepth(), queryDefinition.getPropertyIds());
-
-        if (queryDefinition.isCompositeItems()) {
-            CompositeItem compositeItem = new CompositeItem();
-            compositeItem.addItem("bean", beanItem);
-
-            for (Object propertyId : queryDefinition.getPropertyIds()) {
-                if (compositeItem.getItemProperty(propertyId) == null) {
-                    compositeItem.addItemProperty(
-                            propertyId,
-                            new ObjectProperty(queryDefinition
-                                    .getPropertyDefaultValue(propertyId),
-                                    queryDefinition.getPropertyType(propertyId),
-                                    queryDefinition.isPropertyReadOnly(propertyId)));
-                }
-            }
-
-            return compositeItem;
-        } else {
-            return beanItem;
-        }
+        return itemConverter.toItem(bean, queryDefinition);
     }
 
     /**
@@ -245,15 +228,9 @@ public abstract class AbstractBeanQuery<T> implements Query, Serializable {
      * @param item Item to be converted to bean.
      * @return Resulting bean.
      */
-    @SuppressWarnings("unchecked")
     private T fromItem(final Item item) {
-        if (queryDefinition.isCompositeItems()) {
-            return ((BeanItem<T>) (((CompositeItem) item).getItem("bean")))
-                    .getBean();
-        } else {
-            return ((BeanItem<T>) item).getBean();
-        }
-    }
+        return itemConverter.fromItem(item, queryDefinition);
+   }
 
     /**
      * Converts List of Items to List of Beans.
@@ -262,11 +239,19 @@ public abstract class AbstractBeanQuery<T> implements Query, Serializable {
      * @return List of beans converted from Items.
      */
     private List<T> fromItems(final List<Item> items) {
-        ArrayList<T> beans = new ArrayList<T>();
+        ArrayList<T> beans = new ArrayList<>();
         for (Item item : items) {
             beans.add(fromItem(item));
         }
         return beans;
+    }
+
+
+    public void setItemConverter(BeanToItemConverter<T> itemConverter) {
+        if (itemConverter == null) {
+           throw new IllegalArgumentException("Non-null item converter required.");
+        }
+        this.itemConverter = itemConverter;
     }
 }
 

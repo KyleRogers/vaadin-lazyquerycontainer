@@ -18,7 +18,6 @@ package org.vaadin.addons.lazyquerycontainer;
 import com.vaadin.data.Container;
 import com.vaadin.data.Item;
 import com.vaadin.data.util.BeanItem;
-import com.vaadin.data.util.ObjectProperty;
 import com.vaadin.data.util.filter.*;
 
 import javax.persistence.EntityManager;
@@ -64,6 +63,11 @@ public class EntityQuery<E> implements Query, Serializable {
      * The size of the query.
      */
     private int querySize = -1;
+
+    /**
+     * Converter responsible for converting entities into {@link com.vaadin.data.Item}
+     */
+    private BeanToItemConverter<E> itemConverter = new BeanToNestedItemConverter<>();
 
     /**
      * Constructor for configuring the query.
@@ -155,7 +159,7 @@ public class EntityQuery<E> implements Query, Serializable {
         query.setMaxResults(count);
 
         final List<?> entities = query.getResultList();
-        final List<Item> items = new ArrayList<Item>();
+        final List<Item> items = new ArrayList<>();
         for (final Object entity : entities) {
             if (queryDefinition.isDetachedEntities()) {
                 entityManager.detach(entity);
@@ -174,12 +178,9 @@ public class EntityQuery<E> implements Query, Serializable {
      * @param <SE> the selected entity
      */
     private <SE> void setWhereCriteria(final CriteriaBuilder cb, final CriteriaQuery<SE> cq, final Root<E> root) {
-        final List<Container.Filter> filters = new ArrayList<Container.Filter>();
+        final List<Container.Filter> filters = new ArrayList<>();
         filters.addAll(queryDefinition.getDefaultFilters());
         filters.addAll(queryDefinition.getFilters());
-
-        final Object[] sortPropertyIds;
-        final boolean[] sortPropertyAscendingStates;
 
         Container.Filter rootFilter;
         if (filters.size() > 0) {
@@ -217,7 +218,7 @@ public class EntityQuery<E> implements Query, Serializable {
         }
 
         if (sortPropertyIds.length > 0) {
-            final List<Order> orders = new ArrayList<Order>();
+            final List<Order> orders = new ArrayList<>();
             for (int i = 0; i < sortPropertyIds.length; i++) {
                 final Expression property = (Expression) getPropertyPath(root, sortPropertyIds[i]);
                 if (sortPropertyAscendingStates[i]) {
@@ -247,7 +248,7 @@ public class EntityQuery<E> implements Query, Serializable {
                                 final CriteriaQuery<?> cq, final Root<?> root) {
         if (filter instanceof And) {
             final And and = (And) filter;
-            final List<Container.Filter> filters = new ArrayList<Container.Filter>(and.getFilters());
+            final List<Container.Filter> filters = new ArrayList<>(and.getFilters());
 
             Predicate predicate = cb.and(setFilter(filters.remove(0), cb, cq, root),
                     setFilter(filters.remove(0), cb, cq, root));
@@ -261,7 +262,7 @@ public class EntityQuery<E> implements Query, Serializable {
 
         if (filter instanceof Or) {
             final Or or = (Or) filter;
-            final List<Container.Filter> filters = new ArrayList<Container.Filter>(or.getFilters());
+            final List<Container.Filter> filters = new ArrayList<>(or.getFilters());
 
             Predicate predicate = cb.or(setFilter(filters.remove(0), cb, cq, root),
                     setFilter(filters.remove(0), cb, cq, root));
@@ -444,49 +445,26 @@ public class EntityQuery<E> implements Query, Serializable {
     }
 
     /**
-     * Converts bean to Item. Implemented by encapsulating the Bean first to
-     * BeanItem and then to CompositeItem.
-     *
-     * @param entity bean to be converted.
-     * @return item converted from bean.
-     */
-    @SuppressWarnings({"rawtypes", "unchecked" })
-    protected final Item toItem(final Object entity) {
-        if (queryDefinition.isCompositeItems()) {
-            final NestingBeanItem<?> beanItem = new NestingBeanItem<Object>(entity,
-                    queryDefinition.getMaxNestedPropertyDepth(), queryDefinition.getPropertyIds());
-
-            final CompositeItem compositeItem = new CompositeItem();
-            compositeItem.addItem("bean", beanItem);
-
-            for (final Object propertyId : queryDefinition.getPropertyIds()) {
-                if (compositeItem.getItemProperty(propertyId) == null) {
-                    compositeItem.addItemProperty(
-                            propertyId,
-                            new ObjectProperty(queryDefinition.getPropertyDefaultValue(propertyId), queryDefinition
-                                    .getPropertyType(propertyId), queryDefinition.isPropertyReadOnly(propertyId)));
-                }
-            }
-
-            return compositeItem;
-        } else {
-            return new NestingBeanItem<Object>(entity,
-                    queryDefinition.getMaxNestedPropertyDepth(), queryDefinition.getPropertyIds());
-        }
-    }
-
-    /**
      * Converts item back to bean.
      *
      * @param item Item to be converted to bean.
      * @return Resulting bean.
      */
     protected final Object fromItem(final Item item) {
-        if (queryDefinition.isCompositeItems()) {
-            return (Object) ((BeanItem<?>) (((CompositeItem) item).getItem("bean"))).getBean();
-        } else {
-            return ((BeanItem<?>) item).getBean();
-        }
+        return itemConverter.fromItem(item, queryDefinition);
+    }
+
+
+    /**
+     * Converts bean to Item. Implemented by encapsulating the Bean first to
+     * BeanItem and then to CompositeItem.
+     *
+     * @param entity bean to be converted.
+     * @return item converted from bean.
+     */
+    @SuppressWarnings("unchecked")
+    protected final Item toItem(final Object entity) {
+        return itemConverter.toItem((E)entity, queryDefinition);
     }
 
     /**
@@ -495,5 +473,13 @@ public class EntityQuery<E> implements Query, Serializable {
     protected final EntityQueryDefinition getQueryDefinition() {
         return queryDefinition;
     }
+
+    public void setItemConverter(BeanToItemConverter<E> itemConverter) {
+        if (itemConverter == null) {
+            throw new IllegalArgumentException("Non-null item converter required.");
+        }
+        this.itemConverter = itemConverter;
+    }
+
 
 }
